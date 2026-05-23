@@ -88,11 +88,11 @@
         <strong class="text-warning">Silence Detected</strong>
         <span id="silence-detail" class="ms-2 small text-muted">
           {% if state.input0_silence and state.input1_silence %}
-            Input 1 and Input 2 are both silent
+            PlayoutONE Input 1 and Input 2 are both silent
           {% elif state.input0_silence %}
-            Input 1 (backup audio) is silent
+            PlayoutONE Input 1 is silent
           {% elif state.input1_silence %}
-            Input 2 is silent
+            PlayoutONE Input 2 is silent
           {% endif %}
         </span>
       </div>
@@ -186,9 +186,9 @@
       silenceRow.classList.toggle('d-none', !hasSilence);
       if (hasSilence) {
         let msg = '';
-        if (d.input0_silence && d.input1_silence) msg = 'Input 1 and Input 2 are both silent';
-        else if (d.input0_silence) msg = 'Input 1 (backup audio) is silent';
-        else msg = 'Input 2 is silent';
+        if (d.input0_silence && d.input1_silence) msg = 'PlayoutONE Input 1 and Input 2 are both silent';
+        else if (d.input0_silence) msg = 'PlayoutONE Input 1 is silent';
+        else msg = 'PlayoutONE Input 2 is silent';
         document.getElementById('silence-detail').textContent = msg;
       }
     } catch(e) { /* silently ignore fetch errors */ }

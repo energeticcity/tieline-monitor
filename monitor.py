@@ -280,13 +280,13 @@ async def _monitor_loop() -> None:
         if prev_audio is not None and audio != prev_audio:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if audio == "normal":
-                detail = f"RESOLVED - {name}\nSTL link restored, back to normal\n{ts}"
+                detail = f"RESOLVED - {name}\nStudio audio restored, back to normal\n{ts}"
             elif audio == "backup":
-                detail = f"ALERT - {name}\nSTL link lost, switched to BACKUP audio\n{ts}"
+                detail = f"ALERT - {name}\nStudio audio lost — switched to PlayoutONE at transmitter\n{ts}"
             elif audio == "sdcard":
-                detail = f"ALERT - {name}\nSTL link lost, switched to SD CARD\n{ts}"
+                detail = f"ALERT - {name}\nAll live sources lost — transmitter now playing from SD Card\n{ts}"
             else:
-                detail = f"ALERT - {name}\nNo audio source active - transmitter may be silent\n{ts}"
+                detail = f"ALERT - {name}\nNo audio source active — transmitter may be completely silent\n{ts}"
             alerts.append(detail)
             update_state(
                 last_change_time=now,
@@ -298,41 +298,46 @@ async def _monitor_loop() -> None:
         if prev_tx_up is not None and tx_up != prev_tx_up:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if tx_up:
-                alerts.append(f"RESOLVED - {name}\nTransmitter codec back online\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nTransmitter codec is back online\n{ts}")
             else:
-                alerts.append(f"ALERT - {name}\nTransmitter codec not responding\nCheck: {settings['transmitter_ip']}\n{ts}")
+                alerts.append(f"ALERT - {name}\nTransmitter codec is not responding\nCheck device at {settings['transmitter_ip']}\n{ts}")
             log.warning(f"Transmitter reachable: {prev_tx_up} → {tx_up}")
 
         if prev_st_up is not None and st_up != prev_st_up:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if st_up:
-                alerts.append(f"RESOLVED - {name}\nStudio codec back online\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nStudio codec is back online\n{ts}")
             else:
-                alerts.append(f"ALERT - {name}\nStudio codec not responding\nCheck: {settings['studio_ip']}\n{ts}")
+                alerts.append(f"ALERT - {name}\nStudio codec is not responding\nCheck device at {settings['studio_ip']}\n{ts}")
             log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
 
         if prev_alarm is not None and (alarm_cnt > 0) != (prev_alarm > 0):
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if alarm_cnt > 0:
-                alerts.append(f"ALERT - {name}\nTransmitter has an active alarm — audio may be affected\nCheck codec at {settings['transmitter_ip']}\n{ts}")
+                stl_connected = int_val(tx.get("cxn_state")) == 3
+                stl_active    = int_val(tx.get("src0_state")) == 1
+                if stl_connected and stl_active:
+                    alerts.append(f"ALERT - {name}\nStudio is connected but audio may be silent — no sound coming from studio\n{ts}")
+                else:
+                    alerts.append(f"ALERT - {name}\nTransmitter codec has an active alarm — check device at {settings['transmitter_ip']}\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nTransmitter alarm has cleared, device OK\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nTransmitter alarm cleared — audio OK\n{ts}")
             log.warning(f"Transmitter alarm count: {prev_alarm} → {alarm_cnt}")
 
         if prev_in0_sil is not None and in0_sil != prev_in0_sil:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if in0_sil:
-                alerts.append(f"ALERT - {name}\nNo audio on backup input — computer audio is silent\n{ts}")
+                alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 1) at the transmitter — backup source is silent\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nBackup computer audio is back — audio restored on backup input\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nPlayoutONE (Input 1) audio restored at the transmitter\n{ts}")
             log.warning(f"Input 1 silence: {prev_in0_sil} → {in0_sil}")
 
         if prev_in1_sil is not None and in1_sil != prev_in1_sil:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if in1_sil:
-                alerts.append(f"ALERT - {name}\nNo audio on Input 2 at the transmitter\n{ts}")
+                alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 2) at the transmitter — backup source is silent\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nAudio restored on Input 2 at the transmitter\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nPlayoutONE (Input 2) audio restored at the transmitter\n{ts}")
             log.warning(f"Input 2 silence: {prev_in1_sil} → {in1_sil}")
 
         for body in alerts:
