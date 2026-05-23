@@ -101,12 +101,11 @@ if not exist "%INSTALL_DIR%settings.json" (
     echo   ^<name^>Tieline Monitor^</name^>
     echo   ^<description^>Polls Tieline codecs via SNMP and sends SMS alerts on audio source changes.^</description^>
     echo   ^<executable^>%PYTHON_EXE%^</executable^>
-    echo   ^<arguments^>"%INSTALL_DIR%monitor.py"^</arguments^>
+    echo   ^<arguments^>%INSTALL_DIR%monitor.py^</arguments^>
     echo   ^<workingdirectory^>%INSTALL_DIR%^</workingdirectory^>
     echo   ^<startmode^>Automatic^</startmode^>
-    echo   ^<logpath^>%INSTALL_DIR%^</logpath^>
-    echo   ^<log mode^=^"none^"/^>
-    echo   ^<onfailure action^=^"restart^" delay^=^"5000ms^"/^>
+    echo   ^<log mode='none'/^>
+    echo ^</service^>
 ) > "%SERVICE_XML%"
 
 :: ── Step 6: Install and start the Windows service ─────────────────────────────
