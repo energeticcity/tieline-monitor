@@ -74,7 +74,7 @@ if exist "%SERVICE_EXE%" (
     echo  [OK] Service manager ready
 )
 
-:: ── Step 4: Create settings.json if missing ───────────────────────────────────
+:: ── Step 4: Create or update settings.json ────────────────────────────────────
 if not exist "%INSTALL_DIR%settings.json" (
     echo  Creating default settings.json...
     (
@@ -92,7 +92,15 @@ if not exist "%INSTALL_DIR%settings.json" (
         echo   "web_password": "admin"
         echo }
     ) > "%INSTALL_DIR%settings.json"
+) else (
+    echo  Updating web_port in existing settings.json...
+    powershell -Command "$s = Get-Content '%INSTALL_DIR%settings.json' | ConvertFrom-Json; $s.web_port = 8181; $s | ConvertTo-Json | Set-Content '%INSTALL_DIR%settings.json'"
 )
+
+:: ── Open firewall for web UI port ──────────────────────────────────────────────
+echo  Opening firewall for port 8181...
+netsh advfirewall firewall delete rule name="Tieline Monitor Web UI" >nul 2>&1
+netsh advfirewall firewall add rule name="Tieline Monitor Web UI" dir=in action=allow protocol=TCP localport=8181
 
 :: ── Step 5: Write WinSW service config ────────────────────────────────────────
 (
