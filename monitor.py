@@ -37,7 +37,7 @@ DEFAULT_SETTINGS = {
     "twilio_auth_token":  "",
     "twilio_from_number": "",
     "alert_numbers":      [],
-    "web_port":           8080,
+    "web_port":           8181,
     "web_password":       "admin",
 }
 

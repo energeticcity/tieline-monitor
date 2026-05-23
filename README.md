@@ -72,14 +72,14 @@ Every state change triggers an SMS — including return to normal. The audio fai
                                               monitor.py running as
                                               Windows Service (NSSM)
                                                  │
-                                                 ├── Web UI  :8080
+                                                 ├── Web UI  :8181
                                                  └── SMS via Twilio
 ```
 
 - **SNMP community:** `public` (read-only, no device configuration required)
 - **Polling:** every 30 seconds (configurable 10–300s)
 - **SMS:** Twilio — approximately $0.01 CAD per message
-- **Web UI:** Flask + Waitress on port 8080, password protected
+- **Web UI:** Flask + Waitress on port 8181, password protected
 
 ---
 
@@ -115,7 +115,7 @@ Every state change triggers an SMS — including return to normal. The audio fai
 1. Copy the project folder to the Windows PC (e.g. `C:\tieline-monitor\`)
 2. Right-click `install.bat` → **Run as administrator**
 3. Wait for it to finish — it downloads Python 3.12 embeddable, installs all packages, and registers a Windows service automatically
-4. Open a browser on any machine and go to `http://192.168.3.30:8080`
+4. Open a browser on any machine and go to `http://192.168.3.30:8181`
 5. Log in with password `admin`
 6. Go to **Settings** and enter your Twilio credentials and alert phone numbers
 7. Click **Send Test SMS** to confirm everything is working
@@ -143,7 +143,7 @@ The service is named `TielineMonitor` in Windows Services and starts automatical
 
 ## Web UI
 
-Accessible at `http://192.168.3.30:8080` from any browser on the network.
+Accessible at `http://192.168.3.30:8181` from any browser on the network.
 
 | Page | Description |
 |---|---|
@@ -201,7 +201,7 @@ Created automatically on first run. Edit via the web UI — do not edit the file
 | `twilio_auth_token` | — | From Twilio console |
 | `twilio_from_number` | — | Your Twilio phone number |
 | `alert_numbers` | `[]` | List of numbers to alert |
-| `web_port` | `8080` | Web UI port |
+| `web_port` | `8181` | Web UI port |
 | `web_password` | `admin` | Web UI login password |
 
 ---
@@ -217,7 +217,7 @@ venv/bin/pip install -r requirements.txt
 
 # Run locally
 venv/bin/python3 monitor.py
-# Web UI at http://localhost:8080  (password: admin)
+# Web UI at http://localhost:8181  (password: admin)
 ```
 
 Requires `snmpget` (from `net-snmp`) on macOS/Linux for the subprocess fallback.

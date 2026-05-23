@@ -10,7 +10,7 @@ INSTALL (Windows)
 1. Copy this entire folder to the Windows PC (e.g. C:\tieline-monitor\)
 2. Right-click install.bat → Run as administrator
 3. Wait for it to finish — it downloads Python and sets up the service automatically
-4. Open a browser and go to http://192.168.3.30:8080
+4. Open a browser and go to http://192.168.3.30:8181
 5. Log in with password: admin
 6. Go to Settings and enter your Twilio credentials and alert numbers
 7. Click "Send Test SMS" to confirm it's working
@@ -37,7 +37,7 @@ Or use Windows Services (services.msc) — look for "Tieline Monitor"
 
 WEB UI
 ------
-URL:      http://192.168.3.30:8080  (or the IP of whatever PC it's running on)
+URL:      http://192.168.3.30:8181  (or the IP of whatever PC it's running on)
 Password: set in Settings page (default: admin)
 
 Dashboard — live audio source status, device reachability, recent events

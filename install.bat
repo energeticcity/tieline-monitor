@@ -88,7 +88,7 @@ if not exist "%INSTALL_DIR%settings.json" (
         echo   "twilio_auth_token": "",
         echo   "twilio_from_number": "",
         echo   "alert_numbers": [],
-        echo   "web_port": 8080,
+        echo   "web_port": 8181,
         echo   "web_password": "admin"
         echo }
     ) > "%INSTALL_DIR%settings.json"
