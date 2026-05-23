@@ -65,11 +65,13 @@ AUDIO_STATE_COLOUR = {
 # ── SNMP OIDs ──────────────────────────────────────────────────────────────────
 
 TX_OIDS = {
-    "src0_state":  "1.3.6.1.4.1.37196.2.7.20.2.1.5.0",
-    "src1_state":  "1.3.6.1.4.1.37196.2.7.20.2.1.5.1",
-    "src2_state":  "1.3.6.1.4.1.37196.2.7.20.2.1.5.2",
-    "cxn_state":   "1.3.6.1.4.1.37196.2.3.2.1.7.0",
-    "alarm_count": "1.3.6.1.4.1.37196.2.7.10.0",
+    "src0_state":    "1.3.6.1.4.1.37196.2.7.20.2.1.5.0",
+    "src1_state":    "1.3.6.1.4.1.37196.2.7.20.2.1.5.1",
+    "src2_state":    "1.3.6.1.4.1.37196.2.7.20.2.1.5.2",
+    "cxn_state":     "1.3.6.1.4.1.37196.2.3.2.1.7.0",
+    "alarm_count":   "1.3.6.1.4.1.37196.2.7.10.0",
+    "input0_silence": "1.3.6.1.4.1.37196.2.2.2.1.3.0",
+    "input1_silence": "1.3.6.1.4.1.37196.2.2.2.1.3.1",
 }
 
 STUDIO_OIDS = {
@@ -83,6 +85,9 @@ _state = {
     "audio_state":      "unknown",
     "tx_reachable":     None,
     "studio_reachable": None,
+    "tx_alarm_count":   0,
+    "input0_silence":   False,
+    "input1_silence":   False,
     "last_change_time": None,
     "last_change_from": None,
     "last_change_to":   None,
@@ -237,9 +242,12 @@ def send_sms(body: str, settings: dict) -> list:
 
 async def _monitor_loop() -> None:
     log.info("Monitor loop started")
-    prev_audio = None
-    prev_tx_up = None
-    prev_st_up = None
+    prev_audio    = None
+    prev_tx_up    = None
+    prev_st_up    = None
+    prev_alarm    = 0
+    prev_in0_sil  = False
+    prev_in1_sil  = False
 
     while True:
         settings  = load_settings()
@@ -249,15 +257,21 @@ async def _monitor_loop() -> None:
         tx     = await snmp_get(settings["transmitter_ip"], TX_OIDS,     community)
         studio = await snmp_get(settings["studio_ip"],      STUDIO_OIDS, community)
 
-        tx_up  = any(v is not None for v in tx.values())
-        st_up  = any(v is not None for v in studio.values())
-        audio  = detect_audio_state(tx)
-        now    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tx_up     = any(v is not None for v in tx.values())
+        st_up     = any(v is not None for v in studio.values())
+        audio     = detect_audio_state(tx)
+        alarm_cnt = int_val(tx.get("alarm_count"), 0)
+        in0_sil   = int_val(tx.get("input0_silence"), 0) != 0
+        in1_sil   = int_val(tx.get("input1_silence"), 0) != 0
+        now       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         update_state(
             audio_state=audio,
             tx_reachable=tx_up,
             studio_reachable=st_up,
+            tx_alarm_count=alarm_cnt,
+            input0_silence=in0_sil,
+            input1_silence=in1_sil,
             last_poll_time=now,
         )
 
@@ -297,14 +311,41 @@ async def _monitor_loop() -> None:
                 alerts.append(f"ALERT - {name}\nStudio codec not responding\nCheck: {settings['studio_ip']}\n{ts}")
             log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
 
+        if prev_alarm is not None and (alarm_cnt > 0) != (prev_alarm > 0):
+            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            if alarm_cnt > 0:
+                alerts.append(f"ALERT - {name}\nTransmitter codec alarm active\nCheck device at {settings['transmitter_ip']}\n{ts}")
+            else:
+                alerts.append(f"RESOLVED - {name}\nTransmitter codec alarm cleared\n{ts}")
+            log.warning(f"Transmitter alarm count: {prev_alarm} → {alarm_cnt}")
+
+        if prev_in0_sil is not None and in0_sil != prev_in0_sil:
+            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            if in0_sil:
+                alerts.append(f"ALERT - {name}\nSilence detected on backup audio input (Input 1)\n{ts}")
+            else:
+                alerts.append(f"RESOLVED - {name}\nAudio restored on backup audio input (Input 1)\n{ts}")
+            log.warning(f"Input 1 silence: {prev_in0_sil} → {in0_sil}")
+
+        if prev_in1_sil is not None and in1_sil != prev_in1_sil:
+            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            if in1_sil:
+                alerts.append(f"ALERT - {name}\nSilence detected on audio input (Input 2)\n{ts}")
+            else:
+                alerts.append(f"RESOLVED - {name}\nAudio restored on audio input (Input 2)\n{ts}")
+            log.warning(f"Input 2 silence: {prev_in1_sil} → {in1_sil}")
+
         for body in alerts:
             sent = send_sms(body, settings)
             if sent:
                 update_state(last_sms_time=now, last_sms_to=sent)
 
-        prev_audio = audio
-        prev_tx_up = tx_up
-        prev_st_up = st_up
+        prev_audio   = audio
+        prev_tx_up   = tx_up
+        prev_st_up   = st_up
+        prev_alarm   = alarm_cnt
+        prev_in0_sil = in0_sil
+        prev_in1_sil = in1_sil
 
         await asyncio.sleep(settings.get("poll_interval", 30))
 
@@ -359,10 +400,13 @@ def api_status():
     state = get_state()
     return jsonify({
         **state,
-        "audio_label":  AUDIO_STATE_LABELS.get(state["audio_state"], "Unknown"),
-        "audio_colour": AUDIO_STATE_COLOUR.get(state["audio_state"], "secondary"),
+        "audio_label":      AUDIO_STATE_LABELS.get(state["audio_state"], "Unknown"),
+        "audio_colour":     AUDIO_STATE_COLOUR.get(state["audio_state"], "secondary"),
         "tx_reachable":     state.get("tx_reachable"),
         "studio_reachable": state.get("studio_reachable"),
+        "tx_alarm_count":   state.get("tx_alarm_count", 0),
+        "input0_silence":   state.get("input0_silence", False),
+        "input1_silence":   state.get("input1_silence", False),
     })
 
 

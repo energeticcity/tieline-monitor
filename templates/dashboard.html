@@ -40,7 +40,7 @@
     <div class="card shadow-sm h-100">
       <div class="card-body">
         <div class="text-muted small text-uppercase fw-semibold mb-1">Transmitter Codec</div>
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2 mb-2">
           <span id="tx-badge">
             {% if state.tx_reachable == true %}
               <span class="badge bg-success fs-6"><i class="bi bi-check-circle"></i> Connected</span>
@@ -51,6 +51,9 @@
             {% endif %}
           </span>
           <span class="text-muted small">{{ settings.transmitter_ip }}</span>
+        </div>
+        <div id="tx-alarm-row" class="small {% if not state.tx_alarm_count %}d-none{% endif %}">
+          <span class="badge bg-warning text-dark"><i class="bi bi-bell-fill"></i> Device alarm active</span>
         </div>
       </div>
     </div>
@@ -71,6 +74,27 @@
           </span>
           <span class="text-muted small">{{ settings.studio_ip }}</span>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Input silence status -->
+<div id="silence-row" class="row g-3 mb-3 {% if not (state.input0_silence or state.input1_silence) %}d-none{% endif %}">
+  <div class="col-12">
+    <div class="card border-warning shadow-sm">
+      <div class="card-body py-2">
+        <i class="bi bi-volume-mute-fill text-warning"></i>
+        <strong class="text-warning">Silence Detected</strong>
+        <span id="silence-detail" class="ms-2 small text-muted">
+          {% if state.input0_silence and state.input1_silence %}
+            Input 1 and Input 2 are both silent
+          {% elif state.input0_silence %}
+            Input 1 (backup audio) is silent
+          {% elif state.input1_silence %}
+            Input 2 is silent
+          {% endif %}
+        </span>
       </div>
     </div>
   </div>
@@ -151,6 +175,22 @@
       document.getElementById('audio-label').className   = 'big-status text-' + d.audio_colour;
       document.getElementById('tx-badge').innerHTML      = deviceBadgeHtml(d.tx_reachable);
       document.getElementById('studio-badge').innerHTML  = deviceBadgeHtml(d.studio_reachable);
+
+      // Alarm indicator
+      const alarmRow = document.getElementById('tx-alarm-row');
+      alarmRow.classList.toggle('d-none', !d.tx_alarm_count);
+
+      // Silence indicators
+      const silenceRow = document.getElementById('silence-row');
+      const hasSilence = d.input0_silence || d.input1_silence;
+      silenceRow.classList.toggle('d-none', !hasSilence);
+      if (hasSilence) {
+        let msg = '';
+        if (d.input0_silence && d.input1_silence) msg = 'Input 1 and Input 2 are both silent';
+        else if (d.input0_silence) msg = 'Input 1 (backup audio) is silent';
+        else msg = 'Input 2 is silent';
+        document.getElementById('silence-detail').textContent = msg;
+      }
     } catch(e) { /* silently ignore fetch errors */ }
   }
   refreshStatus();                    // run immediately on page load
