@@ -314,25 +314,25 @@ async def _monitor_loop() -> None:
         if prev_alarm is not None and (alarm_cnt > 0) != (prev_alarm > 0):
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if alarm_cnt > 0:
-                alerts.append(f"ALERT - {name}\nTransmitter codec alarm active\nCheck device at {settings['transmitter_ip']}\n{ts}")
+                alerts.append(f"ALERT - {name}\nTransmitter has an active alarm — audio may be affected\nCheck codec at {settings['transmitter_ip']}\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nTransmitter codec alarm cleared\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nTransmitter alarm has cleared, device OK\n{ts}")
             log.warning(f"Transmitter alarm count: {prev_alarm} → {alarm_cnt}")
 
         if prev_in0_sil is not None and in0_sil != prev_in0_sil:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if in0_sil:
-                alerts.append(f"ALERT - {name}\nSilence detected on backup audio input (Input 1)\n{ts}")
+                alerts.append(f"ALERT - {name}\nNo audio on backup input — computer audio is silent\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nAudio restored on backup audio input (Input 1)\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nBackup computer audio is back — audio restored on backup input\n{ts}")
             log.warning(f"Input 1 silence: {prev_in0_sil} → {in0_sil}")
 
         if prev_in1_sil is not None and in1_sil != prev_in1_sil:
             ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
             if in1_sil:
-                alerts.append(f"ALERT - {name}\nSilence detected on audio input (Input 2)\n{ts}")
+                alerts.append(f"ALERT - {name}\nNo audio on Input 2 at the transmitter\n{ts}")
             else:
-                alerts.append(f"RESOLVED - {name}\nAudio restored on audio input (Input 2)\n{ts}")
+                alerts.append(f"RESOLVED - {name}\nAudio restored on Input 2 at the transmitter\n{ts}")
             log.warning(f"Input 2 silence: {prev_in1_sil} → {in1_sil}")
 
         for body in alerts:
