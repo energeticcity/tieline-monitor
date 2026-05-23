@@ -7,6 +7,7 @@ Serves a web UI on port 8080 for settings and live status.
 import asyncio
 import json
 import logging
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +62,11 @@ AUDIO_STATE_COLOUR = {
     "loss":    "danger",
     "unknown": "secondary",
 }
+
+def _fmt_ts(dt: datetime) -> str:
+    """Format a timestamp for SMS — cross-platform, no leading zeros on hour or day."""
+    return f"{dt.hour % 12 or 12}:{dt.strftime('%M %p %a %b')} {dt.day}"
+
 
 # ── SNMP OIDs ──────────────────────────────────────────────────────────────────
 
@@ -278,7 +284,7 @@ async def _monitor_loop() -> None:
         alerts = []
 
         if prev_audio is not None and audio != prev_audio:
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if audio == "normal":
                 detail = f"RESOLVED - {name}\nStudio audio restored, back to normal\n{ts}"
             elif audio == "backup":
@@ -296,7 +302,7 @@ async def _monitor_loop() -> None:
             log.warning(f"Audio source: {prev_audio} → {audio}")
 
         if prev_tx_up is not None and tx_up != prev_tx_up:
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if tx_up:
                 alerts.append(f"RESOLVED - {name}\nTransmitter codec is back online\n{ts}")
             else:
@@ -304,7 +310,7 @@ async def _monitor_loop() -> None:
             log.warning(f"Transmitter reachable: {prev_tx_up} → {tx_up}")
 
         if prev_st_up is not None and st_up != prev_st_up:
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if st_up:
                 alerts.append(f"RESOLVED - {name}\nStudio codec is back online\n{ts}")
             else:
@@ -312,7 +318,7 @@ async def _monitor_loop() -> None:
             log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
 
         if prev_alarm is not None and (alarm_cnt > 0) != (prev_alarm > 0):
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if alarm_cnt > 0:
                 stl_connected = int_val(tx.get("cxn_state")) == 3
                 stl_active    = int_val(tx.get("src0_state")) == 1
@@ -325,7 +331,7 @@ async def _monitor_loop() -> None:
             log.warning(f"Transmitter alarm count: {prev_alarm} → {alarm_cnt}")
 
         if prev_in0_sil is not None and in0_sil != prev_in0_sil:
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if in0_sil:
                 alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 1) at the transmitter — backup source is silent\n{ts}")
             else:
@@ -333,7 +339,7 @@ async def _monitor_loop() -> None:
             log.warning(f"Input 1 silence: {prev_in0_sil} → {in0_sil}")
 
         if prev_in1_sil is not None and in1_sil != prev_in1_sil:
-            ts = datetime.now().strftime("%-I:%M %p %a %b %-d")
+            ts = _fmt_ts(datetime.now())
             if in1_sil:
                 alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 2) at the transmitter — backup source is silent\n{ts}")
             else:
@@ -356,6 +362,8 @@ async def _monitor_loop() -> None:
 
 
 def run_monitor() -> None:
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(_monitor_loop())
 
 # ── Flask auth ─────────────────────────────────────────────────────────────────
