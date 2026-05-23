@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime files — do not commit
+settings.json
+monitor.log
+monitor_err.log
+state.json
+
+# macOS
+.DS_Store
+
+# macOS LaunchAgent (not used on Windows deployment)
+*.plist
+
+# Development
+.env
+.env.*
+!.env.example

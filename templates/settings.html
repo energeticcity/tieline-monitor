@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Tieline Monitor{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+
+  <!-- Left column: Twilio + Alert Numbers -->
+  <div class="col-lg-7">
+    <form method="post">
+
+      <!-- Twilio -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-phone"></i> Twilio SMS Settings
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Account SID</label>
+            <input type="text" name="twilio_account_sid" class="form-control font-monospace"
+                   value="{{ settings.twilio_account_sid }}"
+                   placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Auth Token</label>
+            <div class="input-group">
+              <input type="password" name="twilio_auth_token" id="auth-token"
+                     class="form-control font-monospace"
+                     value="{{ settings.twilio_auth_token }}"
+                     placeholder="Your auth token">
+              <button class="btn btn-outline-secondary" type="button"
+                      onclick="toggleToken()">
+                <i class="bi bi-eye" id="eye-icon"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-0">
+            <label class="form-label fw-semibold">From Number</label>
+            <input type="text" name="twilio_from_number" class="form-control"
+                   value="{{ settings.twilio_from_number }}"
+                   placeholder="+12505551234">
+            <div class="form-text">Must be a Twilio-purchased number, with country code.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alert Numbers -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-people"></i> Alert Phone Numbers
+        </div>
+        <div class="card-body">
+          <div class="mb-0">
+            <label class="form-label fw-semibold">Numbers to notify</label>
+            <textarea name="alert_numbers" class="form-control font-monospace" rows="4"
+                      placeholder="+17805551234&#10;+17805555678">{{ settings.alert_numbers | join('\n') }}</textarea>
+            <div class="form-text">One number per line, include country code (e.g. +17805551234).</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Device IPs -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-hdd-network"></i> Device Addresses
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Transmitter IP</label>
+              <input type="text" name="transmitter_ip" class="form-control font-monospace"
+                     value="{{ settings.transmitter_ip }}">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Studio IP</label>
+              <input type="text" name="studio_ip" class="form-control font-monospace"
+                     value="{{ settings.studio_ip }}">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">SNMP Community</label>
+              <input type="text" name="snmp_community" class="form-control font-monospace"
+                     value="{{ settings.snmp_community }}">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Poll Interval (seconds)</label>
+              <input type="number" name="poll_interval" class="form-control"
+                     value="{{ settings.poll_interval }}" min="10" max="300">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- General -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-sliders"></i> General
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Station Name</label>
+              <input type="text" name="station_name" class="form-control"
+                     value="{{ settings.station_name }}">
+              <div class="form-text">Appears in SMS messages.</div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Web UI Port</label>
+              <input type="number" name="web_port" class="form-control"
+                     value="{{ settings.web_port }}">
+              <div class="form-text">Restart service after changing.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Password -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-lock"></i> Web UI Password
+        </div>
+        <div class="card-body">
+          <div class="mb-0">
+            <label class="form-label fw-semibold">New Password</label>
+            <input type="password" name="web_password_new" class="form-control"
+                   placeholder="Leave blank to keep current password">
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg px-5">
+        <i class="bi bi-floppy"></i> Save Settings
+      </button>
+    </form>
+  </div>
+
+  <!-- Right column: test + info -->
+  <div class="col-lg-5">
+
+    <!-- Test SMS -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-chat-dots"></i> Test SMS
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Sends a test message to all configured alert numbers using your current Twilio settings.
+          Save first if you made changes.
+        </p>
+        <form method="post" action="{{ url_for('test_sms') }}">
+          <button type="submit" class="btn btn-outline-primary w-100">
+            <i class="bi bi-send"></i> Send Test SMS Now
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Source legend -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle"></i> Audio Source States
+      </div>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex align-items-center gap-2">
+          <span class="badge bg-success">Normal</span>
+          Live STL link from studio is active
+        </li>
+        <li class="list-group-item d-flex align-items-center gap-2">
+          <span class="badge bg-warning text-dark">Backup</span>
+          Computer audio input is active
+        </li>
+        <li class="list-group-item d-flex align-items-center gap-2">
+          <span class="badge bg-warning text-dark">SD Card</span>
+          SD card file playback is active
+        </li>
+        <li class="list-group-item d-flex align-items-center gap-2">
+          <span class="badge bg-danger">Loss</span>
+          No active source or device unreachable
+        </li>
+      </ul>
+    </div>
+
+    <!-- Twilio help -->
+    <div class="card shadow-sm border-info">
+      <div class="card-body">
+        <p class="fw-semibold mb-1"><i class="bi bi-question-circle text-info"></i> New to Twilio?</p>
+        <ol class="small text-muted mb-0 ps-3">
+          <li>Sign up at twilio.com</li>
+          <li>Buy a Canadian phone number (~$1.50/month)</li>
+          <li>Copy your Account SID and Auth Token from the console</li>
+          <li>Each SMS alert costs about $0.01 CAD</li>
+        </ol>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function toggleToken() {
+    const field = document.getElementById('auth-token');
+    const icon  = document.getElementById('eye-icon');
+    if (field.type === 'password') {
+      field.type = 'text';
+      icon.className = 'bi bi-eye-slash';
+    } else {
+      field.type = 'password';
+      icon.className = 'bi bi-eye';
+    }
+  }
+</script>
+{% endblock %}
