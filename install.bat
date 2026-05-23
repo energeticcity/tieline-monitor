@@ -18,7 +18,8 @@ if %errorLevel% neq 0 (
 set "INSTALL_DIR=%~dp0"
 set "PYTHON_DIR=%INSTALL_DIR%python"
 set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
-set "NSSM=%INSTALL_DIR%nssm.exe"
+set "SERVICE_EXE=%INSTALL_DIR%TielineMonitor.exe"
+set "SERVICE_XML=%INSTALL_DIR%TielineMonitor.xml"
 set "SERVICE_NAME=TielineMonitor"
 
 :: ── Step 1: Download Python embeddable if not present ─────────────────────────
@@ -59,20 +60,18 @@ if %errorLevel% neq 0 (
 )
 echo  [OK] Packages installed
 
-:: ── Step 3: Download NSSM if not present ──────────────────────────────────────
-if exist "%NSSM%" (
-    echo  [OK] NSSM already present
+:: ── Step 3: Download WinSW service manager if not present ─────────────────────
+if exist "%SERVICE_EXE%" (
+    echo  [OK] Service manager already present
 ) else (
-    echo  [3/4] Downloading NSSM service manager...
-    powershell -Command "Invoke-WebRequest -Uri 'https://nssm.cc/release/nssm-2.24.zip' -OutFile '%INSTALL_DIR%nssm.zip' -UseBasicParsing"
-    if not exist "%INSTALL_DIR%nssm.zip" (
-        echo  ERROR: Failed to download NSSM. Check your internet connection.
+    echo  [3/4] Downloading WinSW service manager...
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile '%SERVICE_EXE%' -UseBasicParsing"
+    if not exist "%SERVICE_EXE%" (
+        echo  ERROR: Failed to download service manager. Check your internet connection.
         pause
         exit /b 1
     )
-    powershell -Command "Add-Type -Assembly 'System.IO.Compression.FileSystem'; $z = [IO.Compression.ZipFile]::OpenRead('%INSTALL_DIR%nssm.zip'); $entry = $z.Entries | Where-Object { $_.FullName -like '*/win64/nssm.exe' } | Select-Object -First 1; [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, '%NSSM%', $true); $z.Dispose()"
-    del "%INSTALL_DIR%nssm.zip"
-    echo  [OK] NSSM ready
+    echo  [OK] Service manager ready
 )
 
 :: ── Step 4: Create settings.json if missing ───────────────────────────────────
@@ -95,23 +94,36 @@ if not exist "%INSTALL_DIR%settings.json" (
     ) > "%INSTALL_DIR%settings.json"
 )
 
-:: ── Step 5: Install and start the Windows service ─────────────────────────────
+:: ── Step 5: Write WinSW service config ────────────────────────────────────────
+(
+    echo ^<service^>
+    echo   ^<id^>%SERVICE_NAME%^</id^>
+    echo   ^<name^>Tieline Monitor^</name^>
+    echo   ^<description^>Polls Tieline codecs via SNMP and sends SMS alerts on audio source changes.^</description^>
+    echo   ^<executable^>%PYTHON_EXE%^</executable^>
+    echo   ^<arguments^>"%INSTALL_DIR%monitor.py"^</arguments^>
+    echo   ^<workingdirectory^>%INSTALL_DIR%^</workingdirectory^>
+    echo   ^<startmode^>Automatic^</startmode^>
+    echo   ^<logpath^>%INSTALL_DIR%^</logpath^>
+    echo   ^<log mode^=^"none^"/^>
+    echo   ^<onfailure action^=^"restart^" delay^=^"5000ms^"/^>
+) > "%SERVICE_XML%"
+
+:: ── Step 6: Install and start the Windows service ─────────────────────────────
 echo  [4/4] Installing Windows service...
 
 :: Remove existing service if present
-"%NSSM%" stop %SERVICE_NAME% >nul 2>&1
-"%NSSM%" remove %SERVICE_NAME% confirm >nul 2>&1
+"%SERVICE_EXE%" stop >nul 2>&1
+"%SERVICE_EXE%" uninstall >nul 2>&1
 
-"%NSSM%" install %SERVICE_NAME% "%PYTHON_EXE%" "%INSTALL_DIR%monitor.py"
-"%NSSM%" set %SERVICE_NAME% AppDirectory "%INSTALL_DIR%"
-"%NSSM%" set %SERVICE_NAME% DisplayName "Tieline Monitor"
-"%NSSM%" set %SERVICE_NAME% Description "Polls Tieline codecs via SNMP and sends SMS alerts on audio source changes."
-"%NSSM%" set %SERVICE_NAME% Start SERVICE_AUTO_START
-"%NSSM%" set %SERVICE_NAME% AppStdout "%INSTALL_DIR%monitor.log"
-"%NSSM%" set %SERVICE_NAME% AppStderr "%INSTALL_DIR%monitor_err.log"
-"%NSSM%" set %SERVICE_NAME% AppRestartDelay 5000
+"%SERVICE_EXE%" install
+if %errorLevel% neq 0 (
+    echo  ERROR: Service install failed. Check monitor_err.log for details.
+    pause
+    exit /b 1
+)
 
-"%NSSM%" start %SERVICE_NAME%
+"%SERVICE_EXE%" start
 if %errorLevel% neq 0 (
     echo  ERROR: Service failed to start. Check monitor_err.log for details.
     pause

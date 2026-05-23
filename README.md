@@ -127,7 +127,7 @@ The service is named `TielineMonitor` in Windows Services and starts automatical
 1. Downloads Python 3.12 embeddable (no system Python required)
 2. Installs pip into the embedded Python
 3. Installs all Python packages (`pysnmp`, `twilio`, `flask`, `waitress`)
-4. Downloads NSSM (service manager)
+4. Downloads WinSW (Windows Service Wrapper) from GitHub
 5. Registers `TielineMonitor` as an auto-start Windows service
 6. Starts the service
 
@@ -160,10 +160,10 @@ The dashboard auto-refreshes every 20 seconds without a full page reload.
 From an administrator command prompt in the install folder:
 
 ```
-nssm start TielineMonitor
-nssm stop TielineMonitor
-nssm restart TielineMonitor
-nssm status TielineMonitor
+TielineMonitor.exe start
+TielineMonitor.exe stop
+TielineMonitor.exe restart
+TielineMonitor.exe status
 ```
 
 Or use **Windows Services** (`services.msc`) and look for "Tieline Monitor".

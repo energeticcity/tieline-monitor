@@ -26,11 +26,11 @@ MOVING TO A NEW PC
 
 MANAGING THE SERVICE
 --------------------
-From an admin command prompt:
-  Start:   nssm start TielineMonitor
-  Stop:    nssm stop TielineMonitor
-  Restart: nssm restart TielineMonitor
-  Status:  nssm status TielineMonitor
+From an admin command prompt in the install folder:
+  Start:   TielineMonitor.exe start
+  Stop:    TielineMonitor.exe stop
+  Restart: TielineMonitor.exe restart
+  Status:  TielineMonitor.exe status
 
 Or use Windows Services (services.msc) — look for "Tieline Monitor"
 

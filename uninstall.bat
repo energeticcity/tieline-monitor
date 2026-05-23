@@ -8,12 +8,11 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-set "NSSM=%~dp0nssm.exe"
-set "SERVICE_NAME=TielineMonitor"
+set "SERVICE_EXE=%~dp0TielineMonitor.exe"
 
 echo Stopping and removing Tieline Monitor service...
-"%NSSM%" stop %SERVICE_NAME%
-"%NSSM%" remove %SERVICE_NAME% confirm
+"%SERVICE_EXE%" stop
+"%SERVICE_EXE%" uninstall
 
 echo.
 echo Done. The service has been removed.
