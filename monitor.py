@@ -47,6 +47,20 @@ SOURCE_LABELS = {
     2: "SD card",
 }
 
+# Friendly names for the transmitter's audio inputs.
+# Keys are the raw strings the Tieline reports in SNMP (left side of ':' in alarms).
+# Edit the right-hand side to whatever wording you want to appear in SMS messages.
+ALARM_SOURCE_NAMES = {
+    "Input 1": "PlayoutONE (Input 1)",
+    "Input 2": "Backup Computer (Input 2)",
+}
+
+# Friendly versions of the alarm descriptions the device sends.
+# Keys are the raw strings from the Tieline; values are what goes into the SMS.
+ALARM_DESC_REWRITES = {
+    "Input silence detected": "audio has gone silent",
+}
+
 AUDIO_STATE_LABELS = {
     "normal":  "Normal — Live STL link",
     "backup":  "Backup — Computer audio",
@@ -333,11 +347,16 @@ def send_sms(body: str, settings: dict) -> list:
 # ── Monitor loop (runs in its own thread with its own event loop) ──────────────
 
 def _format_alarm(source: str, desc: str) -> str:
-    """Turn ('Input: 1', 'Input silence detected') into 'Input 1 — Input silence detected'."""
-    src = source.replace(":", "").strip() if source else ""
-    if src and desc:
-        return f"{src} — {desc}"
-    return desc or src or "Unknown alarm"
+    """Build the human-readable SMS body for an alarm row.
+    Looks up friendly names from ALARM_SOURCE_NAMES and ALARM_DESC_REWRITES;
+    falls back to the raw device strings if no mapping exists."""
+    raw_src = source.replace(":", "").strip() if source else ""
+    raw_desc = (desc or "").strip()
+    src  = ALARM_SOURCE_NAMES.get(raw_src, raw_src)
+    body = ALARM_DESC_REWRITES.get(raw_desc, raw_desc)
+    if src and body:
+        return f"{src} {body}"
+    return body or src or "Unknown alarm"
 
 
 async def _monitor_loop() -> None:
