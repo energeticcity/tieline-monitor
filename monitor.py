@@ -37,7 +37,7 @@ DEFAULT_SETTINGS = {
     "twilio_auth_token":  "",
     "twilio_from_number": "",
     "alert_numbers":      [],
-    "web_port":           8181,
+    "web_port":           8080,
     "web_password":       "admin",
 }
 
@@ -75,10 +75,11 @@ TX_OIDS = {
     "src1_state":    "1.3.6.1.4.1.37196.2.7.20.2.1.5.1",
     "src2_state":    "1.3.6.1.4.1.37196.2.7.20.2.1.5.2",
     "cxn_state":     "1.3.6.1.4.1.37196.2.3.2.1.7.0",
-    "alarm_count":   "1.3.6.1.4.1.37196.2.7.10.0",
-    "input0_silence": "1.3.6.1.4.1.37196.2.2.2.1.3.0",
-    "input1_silence": "1.3.6.1.4.1.37196.2.2.2.1.3.1",
 }
+
+ALARM_TABLE_OID = "1.3.6.1.4.1.37196.2.1.2.1"
+ALARM_SOURCE_COL = "6"
+ALARM_DESC_COL   = "7"
 
 STUDIO_OIDS = {
     "cxn_state": "1.3.6.1.4.1.37196.2.3.2.1.7.0",
@@ -91,9 +92,7 @@ _state = {
     "audio_state":      "unknown",
     "tx_reachable":     None,
     "studio_reachable": None,
-    "tx_alarm_count":   0,
-    "input0_silence":   False,
-    "input1_silence":   False,
+    "active_alarms":    [],
     "last_change_time": None,
     "last_change_from": None,
     "last_change_to":   None,
@@ -192,6 +191,93 @@ def _snmp_get_subprocess(host: str, oids: dict, community: str) -> dict:
         return {k: None for k in oids}
 
 
+async def snmp_walk_alarms(host: str, community: str) -> list:
+    """Walk the Tieline active-alarm table. Returns list of (source, description) tuples.
+    Empty list means no active alarms or device unreachable."""
+    result = await _snmp_walk_alarms_pysnmp(host, community)
+    if result is None:
+        log.info("Alarm walk: pysnmp failed, trying snmpwalk subprocess")
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, _snmp_walk_alarms_subprocess, host, community
+        )
+    return result or []
+
+
+async def _snmp_walk_alarms_pysnmp(host: str, community: str):
+    """Walks the alarm table using GETNEXT (next_cmd) which works reliably across pysnmp versions.
+    Returns list of (source, description) tuples, or None if pysnmp errored out entirely."""
+    from pysnmp.hlapi.v3arch.asyncio import (
+        next_cmd, SnmpEngine, CommunityData, UdpTransportTarget,
+        ContextData, ObjectType, ObjectIdentity,
+    )
+    sources: dict = {}
+    descs: dict = {}
+    engine = SnmpEngine()
+    try:
+        transport = await UdpTransportTarget.create(
+            (host, 161), timeout=5, retries=1
+        )
+        for col, bucket in ((ALARM_SOURCE_COL, sources), (ALARM_DESC_COL, descs)):
+            base = f"{ALARM_TABLE_OID}.{col}"
+            current_oid = base
+            for _ in range(100):  # safety limit
+                try:
+                    errInd, errStat, _, varBinds = await next_cmd(
+                        engine,
+                        CommunityData(community, mpModel=1),
+                        transport,
+                        ContextData(),
+                        ObjectType(ObjectIdentity(current_oid)),
+                    )
+                except Exception as exc:
+                    log.warning(f"Alarm walk next_cmd failed at {current_oid}: {exc}")
+                    break
+                if errInd or errStat or not varBinds:
+                    break
+                name, val = varBinds[0]
+                oid_str = str(name)
+                if not oid_str.startswith(base + "."):
+                    break
+                idx = oid_str.rsplit(".", 1)[-1]
+                bucket[idx] = str(val)
+                current_oid = oid_str
+    except Exception as exc:
+        log.warning(f"Alarm walk (pysnmp) errored: {exc}")
+        return None
+    finally:
+        engine.close_dispatcher()
+    return [(sources.get(i, ""), descs.get(i, "")) for i in sorted(sources.keys())]
+
+
+def _snmp_walk_alarms_subprocess(host: str, community: str) -> list:
+    import subprocess
+    sources = {}
+    descs = {}
+    for col, bucket in ((ALARM_SOURCE_COL, sources), (ALARM_DESC_COL, descs)):
+        cmd = [
+            "snmpwalk", "-v2c", "-c", community,
+            "-t", "5", "-r", "1", host,
+            f"{ALARM_TABLE_OID}.{col}",
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            for line in result.stdout.strip().splitlines():
+                if "No Such" in line or "=" not in line:
+                    continue
+                left, right = line.split("=", 1)
+                idx = left.strip().rsplit(".", 1)[-1]
+                val = right.strip()
+                if ":" in val:
+                    val = val.split(":", 1)[-1].strip().strip('"')
+                bucket[idx] = val
+        except Exception:
+            continue
+    alarms = []
+    for idx in sorted(sources.keys()):
+        alarms.append((sources.get(idx, ""), descs.get(idx, "")))
+    return alarms
+
+
 def int_val(raw, default: int = -1) -> int:
     try:
         return int(str(raw))
@@ -246,119 +332,129 @@ def send_sms(body: str, settings: dict) -> list:
 
 # ── Monitor loop (runs in its own thread with its own event loop) ──────────────
 
+def _format_alarm(source: str, desc: str) -> str:
+    """Turn ('Input: 1', 'Input silence detected') into 'Input 1 — Input silence detected'."""
+    src = source.replace(":", "").strip() if source else ""
+    if src and desc:
+        return f"{src} — {desc}"
+    return desc or src or "Unknown alarm"
+
+
 async def _monitor_loop() -> None:
     log.info("Monitor loop started")
     prev_audio    = None
     prev_tx_up    = None
     prev_st_up    = None
-    prev_alarm    = 0
-    prev_in0_sil  = False
-    prev_in1_sil  = False
+    prev_alarms = None  # set | None
 
     while True:
-        settings  = load_settings()
-        community = settings["snmp_community"]
-        name      = settings.get("station_name", "Station")
+        try:
+            log.info("Poll: starting")
+            settings  = load_settings()
+            community = settings["snmp_community"]
+            name      = settings.get("station_name", "Station")
 
-        tx     = await snmp_get(settings["transmitter_ip"], TX_OIDS,     community)
-        studio = await snmp_get(settings["studio_ip"],      STUDIO_OIDS, community)
-
-        tx_up     = any(v is not None for v in tx.values())
-        st_up     = any(v is not None for v in studio.values())
-        audio     = detect_audio_state(tx)
-        alarm_cnt = int_val(tx.get("alarm_count"), 0)
-        in0_sil   = int_val(tx.get("input0_silence"), 0) != 0
-        in1_sil   = int_val(tx.get("input1_silence"), 0) != 0
-        now       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        update_state(
-            audio_state=audio,
-            tx_reachable=tx_up,
-            studio_reachable=st_up,
-            tx_alarm_count=alarm_cnt,
-            input0_silence=in0_sil,
-            input1_silence=in1_sil,
-            last_poll_time=now,
-        )
-
-        alerts = []
-
-        if prev_audio is not None and audio != prev_audio:
-            ts = _fmt_ts(datetime.now())
-            if audio == "normal":
-                detail = f"RESOLVED - {name}\nStudio audio restored, back to normal\n{ts}"
-            elif audio == "backup":
-                detail = f"ALERT - {name}\nStudio audio lost — switched to PlayoutONE at transmitter\n{ts}"
-            elif audio == "sdcard":
-                detail = f"ALERT - {name}\nAll live sources lost — transmitter now playing from SD Card\n{ts}"
-            else:
-                detail = f"ALERT - {name}\nNo audio source active — transmitter may be completely silent\n{ts}"
-            alerts.append(detail)
-            update_state(
-                last_change_time=now,
-                last_change_from=prev_audio,
-                last_change_to=audio,
+            log.info(f"Poll: snmp_get tx ({settings['transmitter_ip']})")
+            tx     = await asyncio.wait_for(
+                snmp_get(settings["transmitter_ip"], TX_OIDS, community), timeout=20
             )
-            log.warning(f"Audio source: {prev_audio} → {audio}")
+            log.info(f"Poll: snmp_get studio ({settings['studio_ip']})")
+            studio = await asyncio.wait_for(
+                snmp_get(settings["studio_ip"], STUDIO_OIDS, community), timeout=20
+            )
 
-        if prev_tx_up is not None and tx_up != prev_tx_up:
-            ts = _fmt_ts(datetime.now())
+            tx_up = any(v is not None for v in tx.values())
+            st_up = any(v is not None for v in studio.values())
+            audio = detect_audio_state(tx)
+
             if tx_up:
-                alerts.append(f"RESOLVED - {name}\nTransmitter codec is back online\n{ts}")
+                log.info("Poll: walking alarm table")
+                alarm_list = await asyncio.wait_for(
+                    snmp_walk_alarms(settings["transmitter_ip"], community), timeout=20
+                )
+                curr_alarms = {(s, d) for s, d in alarm_list}
+                log.info(f"Poll: tx_up=True, audio={audio}, active_alarms={len(alarm_list)} {alarm_list}")
             else:
-                alerts.append(f"ALERT - {name}\nTransmitter codec is not responding\nCheck device at {settings['transmitter_ip']}\n{ts}")
-            log.warning(f"Transmitter reachable: {prev_tx_up} → {tx_up}")
+                alarm_list = []
+                curr_alarms = prev_alarms if prev_alarms is not None else set()
+                log.info(f"Poll: tx_up=False, retaining prev alarm set ({len(curr_alarms)} entries)")
 
-        if prev_st_up is not None and st_up != prev_st_up:
-            ts = _fmt_ts(datetime.now())
-            if st_up:
-                alerts.append(f"RESOLVED - {name}\nStudio codec is back online\n{ts}")
-            else:
-                alerts.append(f"ALERT - {name}\nStudio codec is not responding\nCheck device at {settings['studio_ip']}\n{ts}")
-            log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        if prev_alarm is not None and (alarm_cnt > 0) != (prev_alarm > 0):
-            ts = _fmt_ts(datetime.now())
-            if alarm_cnt > 0:
-                stl_connected = int_val(tx.get("cxn_state")) == 3
-                stl_active    = int_val(tx.get("src0_state")) == 1
-                if stl_connected and stl_active:
-                    alerts.append(f"ALERT - {name}\nStudio is connected but audio may be silent — no sound coming from studio\n{ts}")
+            update_state(
+                audio_state=audio,
+                tx_reachable=tx_up,
+                studio_reachable=st_up,
+                active_alarms=[_format_alarm(s, d) for s, d in alarm_list],
+                last_poll_time=now,
+            )
+
+            alerts = []
+
+            if prev_audio is not None and audio != prev_audio:
+                ts = _fmt_ts(datetime.now())
+                if audio == "normal":
+                    detail = f"RESOLVED - {name}\nStudio audio restored, back to normal\n{ts}"
+                elif audio == "backup":
+                    detail = f"ALERT - {name}\nStudio audio lost — switched to PlayoutONE at transmitter\n{ts}"
+                elif audio == "sdcard":
+                    detail = f"ALERT - {name}\nAll live sources lost — transmitter now playing from SD Card\n{ts}"
                 else:
-                    alerts.append(f"ALERT - {name}\nTransmitter codec has an active alarm — check device at {settings['transmitter_ip']}\n{ts}")
-            else:
-                alerts.append(f"RESOLVED - {name}\nTransmitter alarm cleared — audio OK\n{ts}")
-            log.warning(f"Transmitter alarm count: {prev_alarm} → {alarm_cnt}")
+                    detail = f"ALERT - {name}\nNo audio source active — transmitter may be completely silent\n{ts}"
+                alerts.append(detail)
+                update_state(
+                    last_change_time=now,
+                    last_change_from=prev_audio,
+                    last_change_to=audio,
+                )
+                log.warning(f"Audio source: {prev_audio} → {audio}")
 
-        if prev_in0_sil is not None and in0_sil != prev_in0_sil:
-            ts = _fmt_ts(datetime.now())
-            if in0_sil:
-                alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 1) at the transmitter — backup source is silent\n{ts}")
-            else:
-                alerts.append(f"RESOLVED - {name}\nPlayoutONE (Input 1) audio restored at the transmitter\n{ts}")
-            log.warning(f"Input 1 silence: {prev_in0_sil} → {in0_sil}")
+            if prev_tx_up is not None and tx_up != prev_tx_up:
+                ts = _fmt_ts(datetime.now())
+                if tx_up:
+                    alerts.append(f"RESOLVED - {name}\nTransmitter codec is back online\n{ts}")
+                else:
+                    alerts.append(f"ALERT - {name}\nTransmitter codec is not responding\nCheck device at {settings['transmitter_ip']}\n{ts}")
+                log.warning(f"Transmitter reachable: {prev_tx_up} → {tx_up}")
 
-        if prev_in1_sil is not None and in1_sil != prev_in1_sil:
-            ts = _fmt_ts(datetime.now())
-            if in1_sil:
-                alerts.append(f"ALERT - {name}\nNo audio from PlayoutONE (Input 2) at the transmitter — backup source is silent\n{ts}")
-            else:
-                alerts.append(f"RESOLVED - {name}\nPlayoutONE (Input 2) audio restored at the transmitter\n{ts}")
-            log.warning(f"Input 2 silence: {prev_in1_sil} → {in1_sil}")
+            if prev_st_up is not None and st_up != prev_st_up:
+                ts = _fmt_ts(datetime.now())
+                if st_up:
+                    alerts.append(f"RESOLVED - {name}\nStudio codec is back online\n{ts}")
+                else:
+                    alerts.append(f"ALERT - {name}\nStudio codec is not responding\nCheck device at {settings['studio_ip']}\n{ts}")
+                log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
 
-        for body in alerts:
-            sent = send_sms(body, settings)
-            if sent:
-                update_state(last_sms_time=now, last_sms_to=sent)
+            if prev_alarms is not None and tx_up:
+                new_alarms     = curr_alarms - prev_alarms
+                cleared_alarms = prev_alarms - curr_alarms
+                for source, desc in sorted(new_alarms):
+                    ts = _fmt_ts(datetime.now())
+                    label = _format_alarm(source, desc)
+                    alerts.append(f"ALERT - {name}\n{label}\n{ts}")
+                    log.warning(f"Alarm raised: {label}")
+                for source, desc in sorted(cleared_alarms):
+                    ts = _fmt_ts(datetime.now())
+                    label = _format_alarm(source, desc)
+                    alerts.append(f"RESOLVED - {name}\n{label}\n{ts}")
+                    log.warning(f"Alarm cleared: {label}")
 
-        prev_audio   = audio
-        prev_tx_up   = tx_up
-        prev_st_up   = st_up
-        prev_alarm   = alarm_cnt
-        prev_in0_sil = in0_sil
-        prev_in1_sil = in1_sil
+            for body in alerts:
+                sent = send_sms(body, settings)
+                if sent:
+                    update_state(last_sms_time=now, last_sms_to=sent)
 
-        await asyncio.sleep(settings.get("poll_interval", 30))
+            prev_audio  = audio
+            prev_tx_up  = tx_up
+            prev_st_up  = st_up
+            prev_alarms = curr_alarms
+            log.info("Poll: complete")
+        except asyncio.TimeoutError:
+            log.error("Poll: SNMP timeout — device unresponsive or walk hung")
+        except Exception as exc:
+            log.exception(f"Poll: unhandled error: {exc}")
+
+        await asyncio.sleep(load_settings().get("poll_interval", 30))
 
 
 def run_monitor() -> None:
@@ -417,9 +513,7 @@ def api_status():
         "audio_colour":     AUDIO_STATE_COLOUR.get(state["audio_state"], "secondary"),
         "tx_reachable":     state.get("tx_reachable"),
         "studio_reachable": state.get("studio_reachable"),
-        "tx_alarm_count":   state.get("tx_alarm_count", 0),
-        "input0_silence":   state.get("input0_silence", False),
-        "input1_silence":   state.get("input1_silence", False),
+        "active_alarms":    state.get("active_alarms", []),
     })
 
 

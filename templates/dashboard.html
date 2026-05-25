@@ -52,7 +52,7 @@
           </span>
           <span class="text-muted small">{{ settings.transmitter_ip }}</span>
         </div>
-        <div id="tx-alarm-row" class="small {% if not state.tx_alarm_count %}d-none{% endif %}">
+        <div id="tx-alarm-row" class="small {% if not state.active_alarms %}d-none{% endif %}">
           <span class="badge bg-warning text-dark"><i class="bi bi-bell-fill"></i> Device alarm active</span>
         </div>
       </div>
@@ -79,22 +79,18 @@
   </div>
 </div>
 
-<!-- Input silence status -->
-<div id="silence-row" class="row g-3 mb-3 {% if not (state.input0_silence or state.input1_silence) %}d-none{% endif %}">
+<!-- Active alarms -->
+<div id="alarms-row" class="row g-3 mb-3 {% if not state.active_alarms %}d-none{% endif %}">
   <div class="col-12">
     <div class="card border-warning shadow-sm">
       <div class="card-body py-2">
-        <i class="bi bi-volume-mute-fill text-warning"></i>
-        <strong class="text-warning">Silence Detected</strong>
-        <span id="silence-detail" class="ms-2 small text-muted">
-          {% if state.input0_silence and state.input1_silence %}
-            PlayoutONE Input 1 and Input 2 are both silent
-          {% elif state.input0_silence %}
-            PlayoutONE Input 1 is silent
-          {% elif state.input1_silence %}
-            PlayoutONE Input 2 is silent
-          {% endif %}
-        </span>
+        <i class="bi bi-bell-fill text-warning"></i>
+        <strong class="text-warning">Active Alarms</strong>
+        <ul id="alarms-list" class="mb-0 mt-1 small">
+          {% for alarm in state.active_alarms %}
+            <li>{{ alarm }}</li>
+          {% endfor %}
+        </ul>
       </div>
     </div>
   </div>
@@ -176,20 +172,19 @@
       document.getElementById('tx-badge').innerHTML      = deviceBadgeHtml(d.tx_reachable);
       document.getElementById('studio-badge').innerHTML  = deviceBadgeHtml(d.studio_reachable);
 
-      // Alarm indicator
-      const alarmRow = document.getElementById('tx-alarm-row');
-      alarmRow.classList.toggle('d-none', !d.tx_alarm_count);
+      // Alarm row and list
+      const alarms = d.active_alarms || [];
+      const hasAlarms = alarms.length > 0;
+      document.getElementById('tx-alarm-row').classList.toggle('d-none', !hasAlarms);
 
-      // Silence indicators
-      const silenceRow = document.getElementById('silence-row');
-      const hasSilence = d.input0_silence || d.input1_silence;
-      silenceRow.classList.toggle('d-none', !hasSilence);
-      if (hasSilence) {
-        let msg = '';
-        if (d.input0_silence && d.input1_silence) msg = 'PlayoutONE Input 1 and Input 2 are both silent';
-        else if (d.input0_silence) msg = 'PlayoutONE Input 1 is silent';
-        else msg = 'PlayoutONE Input 2 is silent';
-        document.getElementById('silence-detail').textContent = msg;
+      const alarmsRow = document.getElementById('alarms-row');
+      alarmsRow.classList.toggle('d-none', !hasAlarms);
+      const list = document.getElementById('alarms-list');
+      list.innerHTML = '';
+      for (const a of alarms) {
+        const li = document.createElement('li');
+        li.textContent = a;
+        list.appendChild(li);
       }
     } catch(e) { /* silently ignore fetch errors */ }
   }
