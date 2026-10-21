@@ -1,0 +1,7 @@
+# Tieline reachability alert correction
+
+Three consecutive failed management checks over at least60seconds confirm an outage; two successful checks over at least30seconds confirm recovery. Each device has a15minute outage cooldown retained across process restarts. An unannounced flap cannot produce a recovery text. Genuine measured audio source changes bypass this reachability filter. Missing or invalid SNMP source values are unknown, never a measured no-audio state. SNMP failure logs include only device/OID and failure type, never community strings or exception payloads.
+
+The existing on-site alarm names are preserved. The state file stores notification attempts, not Twilio delivery guarantees. Corrupt/unwritable state suppresses reachability texts while preserving audio alarms. No uncontrolled resend is attempted. SMS credentials/recipients, radio configuration, firmware, ports and the Hub relay are unchanged by the source patch.
+
+Run `python -m unittest discover -v`. The Windows installer rechecks old/new hashes and expected service/settings, runs the25tests in the actual installed Python, backs up only the old source, restarts only TielineMonitor, requires fresh healthy native status and byte-identical settings, and restores the old source if acceptance fails. Keep recipients empty through installation; restore the retained recipients only after independent policy, polling and source acceptance. No synthetic SMS is sent during verification.
