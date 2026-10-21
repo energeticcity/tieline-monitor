@@ -23,11 +23,11 @@ $config = Get-Content $configPath -Raw | ConvertFrom-Json
 if ($config.studio_ip -ne '192.168.1.150' -or $config.transmitter_ip -ne '192.168.3.20' -or $config.web_port -ne 8181) { throw 'Unexpected live monitor configuration' }
 if (@($config.alert_numbers).Count -ne 0) { throw 'Keep SMS paused during installation' }
 if (Test-Path (Join-Path $root 'reachability_alerts.py')) { throw 'Existing helper requires review before replacement' }
-Push-Location $package
-try {
- & $python -m unittest discover -v *> (Join-Path $package 'windows-tests.log')
- if ($LASTEXITCODE -ne 0) { throw 'Native Windows regression tests failed; no files installed' }
-} finally { Pop-Location }
+# Start-Process preserves Python's exit status without treating ordinary
+# unittest stderr output as a terminating PowerShell NativeCommandError.
+$tests = Start-Process -FilePath $python -WorkingDirectory $package -ArgumentList @('-m','unittest','discover','-v') -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $package 'windows-tests.stdout.log') -RedirectStandardError (Join-Path $package 'windows-tests.stderr.log')
+if (!$tests.WaitForExit(60000)) { $tests.Kill(); throw 'Native Windows tests exceeded their deadline; no files installed' }
+if ($tests.ExitCode -ne 0) { throw 'Native Windows regression tests failed; no files installed' }
 $backup = Join-Path $root ('alert-fix-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $backup | Out-Null
 Copy-Item (Join-Path $root 'monitor.py') (Join-Path $backup 'monitor.py')
