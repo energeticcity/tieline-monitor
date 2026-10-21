@@ -9,9 +9,14 @@ import json
 import logging
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
+
+# Embedded Windows Python may omit the script directory from sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from reachability_alerts import ReachabilityAlerts
 
 from flask import (
     Flask, render_template, request, redirect,
@@ -51,8 +56,8 @@ SOURCE_LABELS = {
 # Keys are the raw strings the Tieline reports in SNMP (left side of ':' in alarms).
 # Edit the right-hand side to whatever wording you want to appear in SMS messages.
 ALARM_SOURCE_NAMES = {
-    "Input 1": "PlayoutONE (Input 1)",
-    "Input 2": "Backup Computer (Input 2)",
+    "Input 1": "PlayoutONE at Transmitter (Input 1)",
+    "Input 2": "PlayoutOne at Transmitter (Input 2)",
 }
 
 # Friendly versions of the alarm descriptions the device sends.
@@ -174,8 +179,20 @@ async def _snmp_get_pysnmp(host: str, oids: dict, community: str) -> dict:
                     ContextData(),
                     ObjectType(ObjectIdentity(oid)),
                 )
-                results[key] = None if (errInd or errStat) else str(varBinds[0][1])
-            except Exception:
+                if errInd or errStat:
+                    log.warning("SNMP GET failed host=%s oid=%s indication=%s status=%s", host, oid,
+                                type(errInd).__name__ if errInd else "none", int(errStat))
+                    results[key] = None
+                else:
+                    value = str(varBinds[0][1])
+                    try:
+                        int(value)
+                        results[key] = value
+                    except (TypeError, ValueError):
+                        log.warning("SNMP GET invalid numeric value host=%s oid=%s", host, oid)
+                        results[key] = None
+            except Exception as exc:
+                log.warning("SNMP GET exception host=%s oid=%s kind=%s", host, oid, type(exc).__name__)
                 results[key] = None
     except Exception:
         results = {k: None for k in oids}
@@ -199,7 +216,11 @@ def _snmp_get_subprocess(host: str, oids: dict, community: str) -> dict:
             val = line.split("=", 1)[-1].strip()
             if ":" in val:
                 val = val.split(":", 1)[-1].strip().strip('"')
-            values[key] = val if val else None
+            try:
+                int(val)
+                values[key] = val
+            except (TypeError, ValueError):
+                values[key] = None
         return values
     except Exception:
         return {k: None for k in oids}
@@ -304,14 +325,14 @@ def detect_audio_state(tx: dict) -> str:
     s1 = int_val(tx.get("src1_state"))
     s2 = int_val(tx.get("src2_state"))
     if all(v == -1 for v in (s0, s1, s2)):
-        return "loss"
+        return "unknown"
     if s0 == 1:
         return "normal"
     if s1 == 1:
         return "backup"
     if s2 == 1:
         return "sdcard"
-    return "loss"
+    return "loss" if all(v in (0, 2) for v in (s0, s1, s2)) else "unknown"
 
 # ── SMS ────────────────────────────────────────────────────────────────────────
 
@@ -362,8 +383,10 @@ def _format_alarm(source: str, desc: str) -> str:
 async def _monitor_loop() -> None:
     log.info("Monitor loop started")
     prev_audio    = None
-    prev_tx_up    = None
-    prev_st_up    = None
+    reachability = ReachabilityAlerts(BASE_DIR / "reachability-alert-state.json")
+    update_state(reachability_alert_policy={"version": 1, "failure_polls": 3,
+                 "failure_seconds": 60, "recovery_polls": 2, "recovery_seconds": 30,
+                 "cooldown_seconds": 900})
     prev_alarms = None  # set | None
 
     while True:
@@ -378,12 +401,16 @@ async def _monitor_loop() -> None:
                 snmp_get(settings["transmitter_ip"], TX_OIDS, community), timeout=20
             )
             log.info(f"Poll: snmp_get studio ({settings['studio_ip']})")
-            studio = await asyncio.wait_for(
-                snmp_get(settings["studio_ip"], STUDIO_OIDS, community), timeout=20
-            )
+            try:
+                studio = await asyncio.wait_for(
+                    snmp_get(settings["studio_ip"], STUDIO_OIDS, community), timeout=20
+                )
+            except asyncio.TimeoutError:
+                log.warning("Studio management check exceeded its deadline; audio alarms remain independent")
+                studio = {key: None for key in STUDIO_OIDS}
 
-            tx_up = any(v is not None for v in tx.values())
-            st_up = any(v is not None for v in studio.values())
+            tx_up = any(int_val(v) >= 0 for v in tx.values())
+            st_up = any(int_val(v) >= 0 for v in studio.values())
             audio = detect_audio_state(tx)
 
             if tx_up:
@@ -410,7 +437,7 @@ async def _monitor_loop() -> None:
 
             alerts = []
 
-            if prev_audio is not None and audio != prev_audio:
+            if audio != "unknown" and prev_audio is not None and audio != prev_audio:
                 ts = _fmt_ts(datetime.now())
                 if audio == "normal":
                     detail = f"RESOLVED - {name}\nStudio audio restored, back to normal\n{ts}"
@@ -428,21 +455,25 @@ async def _monitor_loop() -> None:
                 )
                 log.warning(f"Audio source: {prev_audio} → {audio}")
 
-            if prev_tx_up is not None and tx_up != prev_tx_up:
-                ts = _fmt_ts(datetime.now())
-                if tx_up:
-                    alerts.append(f"RESOLVED - {name}\nTransmitter codec is back online\n{ts}")
-                else:
-                    alerts.append(f"ALERT - {name}\nTransmitter codec is not responding\nCheck device at {settings['transmitter_ip']}\n{ts}")
-                log.warning(f"Transmitter reachable: {prev_tx_up} → {tx_up}")
-
-            if prev_st_up is not None and st_up != prev_st_up:
-                ts = _fmt_ts(datetime.now())
-                if st_up:
-                    alerts.append(f"RESOLVED - {name}\nStudio codec is back online\n{ts}")
-                else:
-                    alerts.append(f"ALERT - {name}\nStudio codec is not responding\nCheck device at {settings['studio_ip']}\n{ts}")
-                log.warning(f"Studio reachable: {prev_st_up} → {st_up}")
+            for role, label, reachable in (("transmitter", "Transmitter", tx_up), ("studio", "Studio", st_up)):
+                try:
+                    event = reachability.observe(
+                        f"{role}:{settings[role + '_ip']}", reachable, time.time(),
+                        notifications_enabled=bool(settings.get("alert_numbers")),
+                        maximum_sample_gap=max(120, 2 * settings.get("poll_interval", 30) + 60),
+                    )
+                    update_state(reachability_alert_error=None)
+                except (OSError, RuntimeError, ValueError):
+                    log.exception("Reachability notification state unavailable; texts suppressed, audio alarms remain active")
+                    update_state(reachability_alert_error="Notification state unavailable; reachability texts suppressed")
+                    event = None
+                if event:
+                    ts = _fmt_ts(datetime.now())
+                    if event == "recovered":
+                        alerts.append(f"RESOLVED - {name}\n{label} codec is back online (confirmed)\n{ts}")
+                    else:
+                        alerts.append(f"ALERT - {name}\n{label} codec management checks failed for at least 60 seconds\nCheck device at {settings[role + '_ip']}\n{ts}")
+                    log.warning("Confirmed %s management reachability: %s", role, event)
 
             if prev_alarms is not None and tx_up:
                 new_alarms     = curr_alarms - prev_alarms
@@ -463,9 +494,8 @@ async def _monitor_loop() -> None:
                 if sent:
                     update_state(last_sms_time=now, last_sms_to=sent)
 
-            prev_audio  = audio
-            prev_tx_up  = tx_up
-            prev_st_up  = st_up
+            if audio != "unknown":
+                prev_audio = audio
             prev_alarms = curr_alarms
             log.info("Poll: complete")
         except asyncio.TimeoutError:
